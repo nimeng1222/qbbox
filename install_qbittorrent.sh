@@ -87,39 +87,75 @@ install_qbittorrent() {
     fi
 
     show_progress 2 "配置服务"
+    # 创建必要的目录
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
+    mkdir -p /home/${USERNAME}/downloads/temp
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
+    # 生成配置文件
     cat > ${CONFIG_FILE} << EOF
+[AutoRun]
+enabled=false
+
 [LegalNotice]
 Accepted=true
 
+[Network]
+Cookies=@Invalid()
+
 [Preferences]
-WebUI\Port=${WEBUI_PORT}
-WebUI\Username=${USERNAME}
-WebUI\Password_ha1=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
-General\Locale=zh
-Advanced\DiskCache=-1
-Downloads\PreAllocation=false
-Connection\PortRangeMin=${PORT_MIN}
-WebUI\CSRFProtection=false
-Downloads\SavePath=/home/${USERNAME}/downloads
+Advanced\AutoBanUnknownPeer=true
+Advanced\RecheckOnCompletion=false
+Advanced\trackerPort=9000
 Bittorrent\MaxConnecs=-1
 Bittorrent\MaxConnecsPerTorrent=-1
+Bittorrent\MaxRatioAction=0
 Bittorrent\MaxUploads=-1
 Bittorrent\MaxUploadsPerTorrent=-1
-Bittorrent\uTP_rate_limited=false
-Connection\SocketBacklogSize=1024
+Connection\GlobalDLLimit=0
+Connection\GlobalDLLimitAlt=0
+Connection\GlobalUPLimit=0
+Connection\GlobalUPLimitAlt=0
+Connection\PortRangeMin=${PORT_MIN}
 Downloads\DiskWriteCacheSize=-1
-Downloads\SaveResumeDataInterval=1
-Advanced\AsyncIO=true
-Downloads\MaxActiveDownloads=-1
-Downloads\MaxActiveUploads=-1
-Downloads\MaxActiveTorrents=-1
+Downloads\PreAllocation=false
+Downloads\SavePath=/home/${USERNAME}/downloads
+Downloads\TempPath=/home/${USERNAME}/downloads/temp
+General\Locale=zh
+Queueing\QueueingEnabled=false
+WebUI\Address=*
+WebUI\AlternativeUIEnabled=false
+WebUI\AuthSubnetWhitelist=@Invalid()
+WebUI\AuthSubnetWhitelistEnabled=false
+WebUI\BanDuration=3600
+WebUI\CSRFProtection=false
+WebUI\ClickjackingProtection=true
+WebUI\CustomHTTPHeaders=
+WebUI\CustomHTTPHeadersEnabled=false
+WebUI\HTTPS\CertificatePath=
+WebUI\HTTPS\Enabled=false
+WebUI\HTTPS\KeyPath=
+WebUI\HostHeaderValidation=true
+WebUI\LocalHostAuth=true
+WebUI\MaxAuthenticationFailCount=5
+WebUI\Port=${WEBUI_PORT}
+WebUI\ReverseProxySupportEnabled=false
+WebUI\RootFolder=
+WebUI\SecureCookie=true
+WebUI\ServerDomains=*
+WebUI\SessionTimeout=3600
+WebUI\UseUPnP=true
+WebUI\Username=${USERNAME}
+WebUI\Password_ha1=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
 EOF
+
+    # 设置正确的权限
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    chmod 700 /home/${USERNAME}/.config/qBittorrent
+    chmod 600 ${CONFIG_FILE}
 
     # 创建服务
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
@@ -130,7 +166,7 @@ After=network.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/usr/local/bin/qbittorrent-nox --webui-port=${WEBUI_PORT}
+ExecStart=/usr/local/bin/qbittorrent-nox
 Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
@@ -143,8 +179,16 @@ IOSchedulingPriority=0
 WantedBy=multi-user.target
 EOF
 
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-    
+    # 验证配置文件
+    echo -e "${CYAN}验证配置文件...${PLAIN}"
+    if grep -q "WebUI\Username=${USERNAME}" ${CONFIG_FILE} && \
+       grep -q "WebUI\Password_ha1=" ${CONFIG_FILE}; then
+        echo -e "${GREEN}配置文件验证成功${PLAIN}"
+    else
+        echo -e "${RED}配置文件验证失败${PLAIN}"
+        exit 1
+    fi
+
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
     systemctl start qbittorrent-nox@${USERNAME}
