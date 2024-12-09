@@ -263,7 +263,7 @@ uninstall_qbittorrent() {
     rm -f /etc/systemd/system/qbittorrent-nox@.service
     
     show_progress 2 "清理配置"
-    read -p "$(echo -e ${BLUE}是否删除配置文件和下载目录？(y/n): ${PLAIN})" choice
+    read -r -p "$(echo -e "${BLUE}是否删除配置文件和下载目录？[y/n]: ${PLAIN}")" choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
         rm -rf /home/${DEFAULT_USER}/.local/share/data/qBittorrent
@@ -271,7 +271,7 @@ uninstall_qbittorrent() {
     fi
     
     show_progress 2 "删除用户"
-    read -p "$(echo -e ${BLUE}是否删除用户 ${DEFAULT_USER}？(y/n): ${PLAIN})" choice
+    read -r -p "$(echo -e "${BLUE}是否删除用户 ${DEFAULT_USER}？[y/n]: ${PLAIN}")" choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         userdel -r ${DEFAULT_USER} 2>/dev/null
     fi
