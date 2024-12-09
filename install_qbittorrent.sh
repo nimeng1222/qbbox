@@ -107,7 +107,37 @@ install_qbittorrent() {
 
     show_progress 2 "配置服务"
     
-    # 创建服务文件
+    # 创建密码更新脚本
+    PASSWORD_UPDATE_SCRIPT="/usr/local/bin/update_qbittorrent_password.sh"
+
+    cat > ${PASSWORD_UPDATE_SCRIPT} << EOF
+#!/bin/bash
+
+USERNAME="${USERNAME}"
+PASSWORD="${PASSWORD}"
+CONFIG_FILE="/home/\${USERNAME}/.config/qBittorrent/qBittorrent.conf"
+
+# 等待配置文件存在
+for i in {1..30}; do
+    if [ -f "\${CONFIG_FILE}" ]; then
+        break
+    fi
+    sleep 1
+done
+
+# 生成密码哈希
+PASSWORD_HASH=\$(echo -n "\${USERNAME}:qBittorrent:\${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+
+# 更新配置文件中的密码哈希
+sed -i "s/WebUI\\\\Password_ha1=.*/WebUI\\\\Password_ha1=\${PASSWORD_HASH}/" \${CONFIG_FILE}
+
+# 设置正确的权限
+chown \${USERNAME}:\${USERNAME} \${CONFIG_FILE}
+chmod 600 \${CONFIG_FILE}
+EOF
+
+    chmod +x ${PASSWORD_UPDATE_SCRIPT}
+        # 创建服务文件
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
@@ -116,6 +146,7 @@ After=network.target
 [Service]
 Type=simple
 User=%i
+ExecStartPre=${PASSWORD_UPDATE_SCRIPT}
 ExecStart=/usr/local/bin/qbittorrent-nox
 Restart=always
 LimitNOFILE=1048576
@@ -137,7 +168,8 @@ EOF
     mkdir -p /home/${USERNAME}/.config/qBittorrent/logs
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
-        # 生成密码哈希
+
+    # 生成密码哈希
     PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件路径
@@ -240,6 +272,7 @@ uninstall_qbittorrent() {
     
     show_progress 2 "删除文件"
     rm -f /usr/local/bin/qbittorrent-nox
+    rm -f /usr/local/bin/update_qbittorrent_password.sh
     rm -f /etc/systemd/system/qbittorrent-nox@.service
     
     show_progress 2 "清理配置"
