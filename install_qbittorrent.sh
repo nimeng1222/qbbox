@@ -35,6 +35,20 @@ show_progress() {
     echo
 }
 
+# 检查是否已安装
+check_installed() {
+    if [ -f "/usr/local/bin/qbittorrent-nox" ]; then
+        echo -e "${YELLOW}检测到已安装 qBittorrent${PLAIN}"
+        read -p "$(echo -e ${BLUE}是否卸载旧版本？[y/n]:${PLAIN})" choice
+        if [[ $choice == "y" || $choice == "Y" ]]; then
+            uninstall_qbittorrent
+        else
+            echo -e "${RED}安装已取消${PLAIN}"
+            exit 1
+        fi
+    fi
+}
+
 # 获取用户输入
 get_user_input() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
@@ -80,8 +94,7 @@ install_qbittorrent() {
     show_progress 2 "配置服务"
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
-    
-    # 配置文件
+        # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
     cat > ${CONFIG_FILE} << EOF
@@ -217,17 +230,26 @@ show_menu() {
     echo -e "
     ${GREEN}Wait 定制版 qBittorrent 管理脚本${PLAIN}
     ————————————————
-    ${GREEN}1.${PLAIN} 安装 qBittorrent
+    ${GREEN}1.${PLAIN} 安装/更新 qBittorrent
     ${GREEN}2.${PLAIN} 卸载 qBittorrent
     ${GREEN}0.${PLAIN} 退出脚本
     "
     echo && read -p "请输入选择 [0-2]: " num
 
     case "${num}" in
-        1) install_and_configure ;;
-        2) uninstall_qbittorrent ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 ;;
+        1) 
+            check_installed
+            install_and_configure 
+            ;;
+        2) 
+            uninstall_qbittorrent 
+            ;;
+        0) 
+            exit 0 
+            ;;
+        *) 
+            echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 
+            ;;
     esac
 }
 
