@@ -132,8 +132,8 @@ main() {
     echo "WebUI访问地址: http://服务器IP:${WEBUI_PORT}"
 
     # 计划重启
-    echo -e "\n系统将在 1 分钟后重启..."
-    shutdown -r +1
+    echo -e "\n系统将在 20 秒后重启..."
+    shutdown -r +0.34
 }
 
 # 检查是否以 root 权限运行
