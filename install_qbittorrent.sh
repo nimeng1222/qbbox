@@ -1,148 +1,228 @@
 #!/bin/bash
 
-# 脚本名称: install_qbittorrent.sh
-# 描述: 安装并配置 qBittorrent 的自动化脚本
-# 创建日期: 2024-03-21
-
-# 设置错误时退出
-set -e
-
 # 默认值
-QB_VERSION="4.3.8"
-LT_VERSION="v1.2.14"
 WEBUI_PORT="12311"
 PORT_MIN="55000"
+DEFAULT_USER="waitnm"
+DEFAULT_PASS="waitdxx"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+PLAIN='\033[0m'
+
+# 进度条函数
+show_progress() {
+    local duration=$1
+    local prefix=$2
+    local width=50
+    local fill="━"
+    local empty="═"
+    
+    for ((i = 0; i <= width; i++)); do
+        local progress=$((i * 100 / width))
+        local completed=$((i * width / width))
+        printf "\r${BLUE}${prefix} [${YELLOW}"
+        printf "%${completed}s" | tr ' ' "${fill}"
+        printf "%$((width - completed))s" | tr ' ' "${empty}"
+        printf "${BLUE}] ${YELLOW}%3d%%${PLAIN}" $progress
+        sleep $(bc <<< "scale=3; $duration/$width")
+    done
+    echo
+}
 
 # 获取用户输入
 get_user_input() {
-    # 用户名
-    while true; do
-        read -p "请输入用户名 (仅允许字母和数字): " USERNAME
-        if [[ $USERNAME =~ ^[a-zA-Z0-9]+$ ]]; then
-            break
-        else
-            echo "错误: 用户名只能包含字母和数字"
-        fi
-    done
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${YELLOW}欢迎使用 Wait 定制版 qBittorrent 安装脚本${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo
+    read -p "$(echo -e ${BLUE}请输入用户名 [默认: ${DEFAULT_USER}]: ${PLAIN})" USERNAME
+    USERNAME=${USERNAME:-${DEFAULT_USER}}
+    
+    read -s -p "$(echo -e ${BLUE}请输入密码 [默认: ${DEFAULT_PASS}]: ${PLAIN})" PASSWORD
+    echo
+    PASSWORD=${PASSWORD:-${DEFAULT_PASS}}
+    
+    read -p "$(echo -e ${BLUE}请输入 WebUI 端口 [默认: ${WEBUI_PORT}]: ${PLAIN})" input_port
+    WEBUI_PORT=${input_port:-${WEBUI_PORT}}
+    echo
+}
 
-    # 密码
-    while true; do
-        read -s -p "请输入密码 (至少6个字符): " PASSWORD
-        echo
-        if [[ ${#PASSWORD} -ge 6 ]]; then
-            read -s -p "请再次输入密码: " PASSWORD2
-            echo
-            if [[ "$PASSWORD" == "$PASSWORD2" ]]; then
-                break
-            else
-                echo "错误: 两次输入的密码不匹配"
-            fi
-        else
-            echo "错误: 密码长度必须至少为6个字符"
-        fi
-    done
-
-    # WebUI端口
-    while true; do
-        read -p "请输入 WebUI 端口 (默认: 12311): " input_port
-        if [[ -z "$input_port" ]]; then
-            break
-        elif [[ "$input_port" =~ ^[0-9]+$ ]] && [ "$input_port" -ge 1024 ] && [ "$input_port" -le 65535 ]; then
-            WEBUI_PORT=$input_port
-            break
-        else
-            echo "错误: 请输入有效的端口号 (1024-65535)"
-        fi
-    done
-
-    # 确认信息
-    echo -e "\n请确认以下信息:"
-    echo "用户名: $USERNAME"
-    echo "WebUI端口: $WEBUI_PORT"
-    read -p "是否继续? (y/n): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo "安装已取消"
-        exit 1
+# 安装 qBittorrent
+install_qbittorrent() {
+    echo -e "${CYAN}开始安装 qBittorrent...${PLAIN}"
+    show_progress 2 "安装依赖"
+    apt update > /dev/null 2>&1
+    apt install -y curl wget > /dev/null 2>&1
+    
+    cd /usr/local/bin/
+    echo -e "${CYAN}下载 qBittorrent...${PLAIN}"
+    show_progress 3 "下载文件"
+    wget -q -O qbittorrent-nox "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}主链接下载失败，尝试代理下载...${PLAIN}"
+        wget -q -O qbittorrent-nox "https://ghproxy.com/https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     fi
+    
+    chmod +x qbittorrent-nox
+
+    show_progress 2 "创建用户"
+    if ! id "${USERNAME}" >/dev/null 2>&1; then
+        useradd -r -m -s /bin/false ${USERNAME}
+    fi
+
+    show_progress 2 "配置服务"
+    mkdir -p /home/${USERNAME}/.config/qBittorrent
+    mkdir -p /home/${USERNAME}/downloads
+    
+    # 配置文件
+    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
+    
+    cat > ${CONFIG_FILE} << EOF
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+WebUI\Port=${WEBUI_PORT}
+WebUI\Username=${USERNAME}
+WebUI\Password_ha1=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+General\Locale=zh
+Advanced\DiskCache=-1
+Downloads\PreAllocation=false
+Connection\PortRangeMin=${PORT_MIN}
+WebUI\CSRFProtection=false
+Downloads\SavePath=/home/${USERNAME}/downloads
+Bittorrent\MaxConnecs=-1
+Bittorrent\MaxConnecsPerTorrent=-1
+Bittorrent\MaxUploads=-1
+Bittorrent\MaxUploadsPerTorrent=-1
+Bittorrent\uTP_rate_limited=false
+Connection\SocketBacklogSize=1024
+Downloads\DiskWriteCacheSize=-1
+Downloads\SaveResumeDataInterval=1
+Advanced\AsyncIO=true
+Downloads\MaxActiveDownloads=-1
+Downloads\MaxActiveUploads=-1
+Downloads\MaxActiveTorrents=-1
+EOF
+
+    # 创建服务
+    cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
+[Unit]
+Description=qBittorrent-nox service for %i
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/qbittorrent-nox --webui-port=${WEBUI_PORT}
+Restart=always
+LimitNOFILE=1048576
+LimitNPROC=infinity
+TasksMax=infinity
+Nice=-10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    
+    systemctl daemon-reload
+    systemctl enable qbittorrent-nox@${USERNAME}
+    systemctl start qbittorrent-nox@${USERNAME}
+}
+
+# 系统优化
+optimize_system() {
+    echo -e "${CYAN}优化系统设置...${PLAIN}"
+    show_progress 3 "系统优化"
+    
+    cat > /etc/security/limits.conf << EOF
+* soft nofile 1048576
+* hard nofile 1048576
+${USERNAME} soft nofile 1048576
+${USERNAME} hard nofile 1048576
+* soft nproc unlimited
+* hard nproc unlimited
+EOF
+
+    cat > /etc/sysctl.conf << EOF
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.rmem_default = 65536
+net.core.wmem_default = 65536
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.core.netdev_max_backlog = 32768
+net.core.somaxconn = 32768
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+fs.file-max = 6815744
+EOF
+
+    sysctl -p > /dev/null 2>&1
 }
 
 # 主函数
 main() {
-    # 获取用户输入
-    get_user_input
-
-    # 切换到 root 目录
-    cd /root
-
-    # 安装 Seedbox
-    echo "开始安装 Seedbox..."
-    bash <(wget -qO- https://raw.githubusercontent.com/SAGIRIxr/Dedicated-Seedbox/main/Install.sh) \
-        -u "${USERNAME}" \
-        -p "${PASSWORD}" \
-        -c 1024 \
-        -q "${QB_VERSION}" \
-        -l "${LT_VERSION}" \
-        -x
-
-    # 安装额外工具
-    echo "安装额外工具..."
-    apt install -y curl htop vnstat
-
-    # 停止和禁用 qBittorrent 服务
-    echo "配置 qBittorrent 服务..."
-    systemctl stop "qbittorrent-nox@${USERNAME}"
-    systemctl disable "qbittorrent-nox@${USERNAME}"
-
-    # 调整文件系统预留空间
-    echo "调整文件系统设置..."
-    tune2fs -m 1 $(df -h / | awk 'NR==2 {print $1}')
-
-    # 配置 qBittorrent
-    echo "配置 qBittorrent 设置..."
-    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
-    
-    # 等待配置文件创建
-    while [ ! -f "${CONFIG_FILE}" ]; do
-        sleep 1
-    done
-
-    # 确保 [Preferences] 部分存在
-    if ! grep -q "\[Preferences\]" "${CONFIG_FILE}"; then
-        echo -e "\n[Preferences]" >> "${CONFIG_FILE}"
+    if [ "$EUID" -ne 0 ]; then 
+        echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}"
+        exit 1
     fi
 
-    # 修改配置
-    sed -i '/^Advanced\\DiskCache=/d' "${CONFIG_FILE}"  # 删除已存在的磁盘缓存设置
-    sed -i '/\[Preferences\]/a Advanced\\DiskCache=-1' "${CONFIG_FILE}"
+    clear
+    echo -e "${PURPLE}
+    ██╗    ██╗ █████╗ ██╗████████╗    ██████╗ ██████╗ ██╗████████╗
+    ██║    ██║██╔══██╗██║╚══██╔══╝    ██╔══██╗██╔══██╗██║╚══██╔══╝
+    ██║ █╗ ██║███████║██║   ██║       ██████╔╝██████╔╝██║   ██║   
+    ██║███╗██║██╔══██║██║   ██║       ██╔══██╗██╔══██╗██║   ██║   
+    ╚███╔███╔╝██║  ██║██║   ██║       ██████╔╝██████╔╝██║   ██║   
+     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝   ╚═╝       ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   
+                                                     By Wait Team
+    ${PLAIN}"
     
-    sed -i "s/WebUI\\\\Port=[0-9]*/WebUI\\\\Port=${WEBUI_PORT}/" "${CONFIG_FILE}"
-    sed -i "s/Connection\\\\PortRangeMin=[0-9]*/Connection\\\\PortRangeMin=${PORT_MIN}/" "${CONFIG_FILE}"
-    sed -i '/\[Preferences\]/a General\\Locale=zh' "${CONFIG_FILE}"
-    sed -i '/\[Preferences\]/a Downloads\\PreAllocation=false' "${CONFIG_FILE}"
-    sed -i '/\[Preferences\]/a WebUI\\CSRFProtection=false' "${CONFIG_FILE}"
+    get_user_input
+    install_qbittorrent
+    optimize_system
 
-    # 添加开机自启动并重启
-    echo "配置开机自启动..."
-    echo -e "\nsystemctl enable qbittorrent-nox@${USERNAME} && reboot" >> /root/BBRx.sh
-
-    # 显示安装信息
-    echo -e "\n安装完成! 请记住以下信息:"
-    echo "用户名: $USERNAME"
-    echo "WebUI端口: $WEBUI_PORT"
-    echo "WebUI访问地址: http://服务器IP:${WEBUI_PORT}"
-
-    # 计划重启
-    echo -e "\n系统将在 20 秒后重启..."
-    shutdown -r +0.34
+    # 获取公网 IP
+    IP=$(curl -s ip.sb)
+    
+    clear
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${GREEN} Wait 定制版 qBittorrent 安装成功！${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e ""
+    echo -e "${YELLOW} WebUI 信息：${PLAIN}"
+    echo -e "${GREEN} 访问地址：${PLAIN}${BLUE}http://${IP}:${WEBUI_PORT}${PLAIN}"
+    echo -e "${GREEN} 用户名：${PLAIN}${BLUE}${USERNAME}${PLAIN}"
+    echo -e "${GREEN} 密码：${PLAIN}${BLUE}${PASSWORD}${PLAIN}"
+    echo -e "${GREEN} 下载目录：${PLAIN}${BLUE}/home/${USERNAME}/downloads${PLAIN}"
+    echo -e ""
+    echo -e "${YELLOW} 定制优化：${PLAIN}"
+    echo -e "${GREEN} - 自动配置最佳性能参数${PLAIN}"
+    echo -e "${GREEN} - 优化系统网络设置${PLAIN}"
+    echo -e "${GREEN} - Wait 专属优化配置${PLAIN}"
+    echo -e ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${YELLOW} 系统将在 20 秒后重启...${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    
+    sleep 20
+    reboot
 }
 
-# 检查是否以 root 权限运行
-if [ "$EUID" -ne 0 ]; then 
-    echo "请使用 root 权限运行此脚本"
-    exit 1
-fi
-
-# 运行主函数
 main
-
 exit 0
