@@ -19,20 +19,16 @@ PLAIN='\033[0m'
 show_progress() {
     local duration=$1
     local prefix=$2
-    local width=50
+    local width=20  # 减少宽度使进度条更快
     local fill="━"
     local empty="═"
     
+    echo -ne "${BLUE}${prefix} [${YELLOW}"
     for ((i = 0; i <= width; i++)); do
-        local progress=$((i * 100 / width))
-        local completed=$((i * width / width))
-        printf "\r${BLUE}${prefix} [${YELLOW}"
-        printf "%${completed}s" | tr ' ' "${fill}"
-        printf "%$((width - completed))s" | tr ' ' "${empty}"
-        printf "${BLUE}] ${YELLOW}%3d%%${PLAIN}" $progress
-        sleep $(bc <<< "scale=3; $duration/$width")
+        echo -n "${fill}"
+        sleep 0.1
     done
-    echo
+    echo -ne "${BLUE}] ${YELLOW}100%${PLAIN}\n"
 }
 
 # 检查是否已安装
@@ -83,8 +79,7 @@ install_qbittorrent() {
         echo -e "${YELLOW}主链接下载失败，尝试代理下载...${PLAIN}"
         wget -q -O qbittorrent-nox "https://ghproxy.com/https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     fi
-    
-    chmod +x qbittorrent-nox
+        chmod +x qbittorrent-nox
 
     show_progress 2 "创建用户"
     if ! id "${USERNAME}" >/dev/null 2>&1; then
@@ -94,7 +89,8 @@ install_qbittorrent() {
     show_progress 2 "配置服务"
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
-        # 配置文件
+    
+    # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
     cat > ${CONFIG_FILE} << EOF
