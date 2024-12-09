@@ -181,27 +181,31 @@ IOSchedulingPriority=0
 WantedBy=multi-user.target
 EOF
 
-    # 验证配置文件
-    echo -e "${CYAN}验证配置文件...${PLAIN}"
-    if [ -f "${CONFIG_FILE}" ]; then
-        echo -e "${GREEN}配置文件存在${PLAIN}"
-        
-        # 检查关键配置项
-        if grep -q "WebUI\\\\Username=${USERNAME}" ${CONFIG_FILE} && \
-           grep -q "WebUI\\\\Password_ha1=${PASSWORD_HASH}" ${CONFIG_FILE}; then
-            echo -e "${GREEN}配置文件验证成功${PLAIN}"
-        else
-            echo -e "${RED}配置文件验证失败${PLAIN}"
-            echo -e "${YELLOW}当前用户名：${USERNAME}${PLAIN}"
-            echo -e "${YELLOW}当前密码哈希：${PASSWORD_HASH}${PLAIN}"
-            echo -e "${YELLOW}配置文件内容：${PLAIN}"
-            cat ${CONFIG_FILE}
-            exit 1
-        fi
+# 验证配置文件
+echo -e "${CYAN}验证配置文件...${PLAIN}"
+if [ -f "${CONFIG_FILE}" ]; then
+    echo -e "${GREEN}配置文件存在${PLAIN}"
+    
+    # 检查关键配置项
+    USERNAME_CHECK=$(grep "WebUI\\\\Username" ${CONFIG_FILE} | cut -d= -f2)
+    PASSWORD_CHECK=$(grep "WebUI\\\\Password_ha1" ${CONFIG_FILE} | cut -d= -f2)
+    
+    echo -e "${YELLOW}检查配置：${PLAIN}"
+    echo -e "用户名设置：${USERNAME_CHECK}"
+    echo -e "密码哈希：${PASSWORD_CHECK}"
+    
+    if [ "${USERNAME_CHECK}" = "${USERNAME}" ] && [ -n "${PASSWORD_CHECK}" ]; then
+        echo -e "${GREEN}配置文件验证成功${PLAIN}"
     else
-        echo -e "${RED}配置文件不存在${PLAIN}"
+        echo -e "${RED}配置文件验证失败${PLAIN}"
+        echo -e "${YELLOW}配置文件内容：${PLAIN}"
+        cat ${CONFIG_FILE}
         exit 1
     fi
+else
+    echo -e "${RED}配置文件不存在${PLAIN}"
+    exit 1
+fi
 
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
