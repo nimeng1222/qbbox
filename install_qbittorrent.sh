@@ -19,7 +19,7 @@ PLAIN='\033[0m'
 show_progress() {
     local duration=$1
     local prefix=$2
-    local width=20
+    local width=20  # 减少宽度使进度条更快
     local fill="━"
     local empty="═"
     
@@ -62,7 +62,6 @@ get_user_input() {
     WEBUI_PORT=${input_port:-${WEBUI_PORT}}
     echo
 }
-
 # 安装 qBittorrent
 install_qbittorrent() {
     echo -e "${CYAN}开始安装 qBittorrent...${PLAIN}"
@@ -72,34 +71,15 @@ install_qbittorrent() {
     
     cd /usr/local/bin/
     echo -e "${CYAN}下载 qBittorrent...${PLAIN}"
+    show_progress 3 "下载文件"
+    wget -q -O qbittorrent-nox "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     
-    # 定义下载链接
-    MAIN_URL="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
-    PROXY_URL="https://ghproxy.com/${MAIN_URL}"
-    
-    # 尝试主链接下载
-    echo -e "${YELLOW}尝试从主链接下载...${PLAIN}"
-    if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${MAIN_URL}"; then
+    if [ $? -ne 0 ]; then
         echo -e "${YELLOW}主链接下载失败，尝试代理下载...${PLAIN}"
-        if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${PROXY_URL}"; then
-            echo -e "${RED}下载失败！尝试备用链接...${PLAIN}"
-            # 备用链接
-            BACKUP_URL="https://cdn.jsdelivr.net/gh/userdocs/qbittorrent-nox-static@release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
-            if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${BACKUP_URL}"; then
-                echo -e "${RED}所有下载尝试均失败，请检查网络连接！${PLAIN}"
-                exit 1
-            fi
-        fi
-    fi
-    
-    # 验证下载文件
-    if [ ! -f "qbittorrent-nox" ] || [ ! -s "qbittorrent-nox" ]; then
-        echo -e "${RED}下载文件不存在或大小为0，安装失败！${PLAIN}"
-        exit 1
+        wget -q -O qbittorrent-nox "https://ghproxy.com/https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     fi
     
     chmod +x qbittorrent-nox
-    echo -e "${GREEN}下载完成！${PLAIN}"
 
     show_progress 2 "创建用户"
     if ! id "${USERNAME}" >/dev/null 2>&1; then
@@ -108,7 +88,54 @@ install_qbittorrent() {
 
     show_progress 2 "配置服务"
     
-    # 创建服务文件
+    # 先停止可能运行的实例
+    systemctl stop qbittorrent-nox@${USERNAME} 2>/dev/null
+    
+    # 删除可能存在的旧配置
+    rm -rf /home/${USERNAME}/.config/qBittorrent
+    rm -rf /home/${USERNAME}/.local/share/qBittorrent
+    
+    # 创建必要的目录
+    mkdir -p /home/${USERNAME}/.config/qBittorrent
+    mkdir -p /home/${USERNAME}/downloads
+    mkdir -p /home/${USERNAME}/downloads/temp
+    
+    # 生成密码哈希 - 修改这里，使用用户输入的密码
+    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+    
+    # 配置文件
+    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
+    
+    # 生成配置文件
+    cat > ${CONFIG_FILE} << EOF
+[AutoRun]
+enabled=false
+
+[LegalNotice]
+Accepted=true
+
+[Network]
+Cookies=@Invalid()
+
+[Preferences]
+Connection\PortRangeMin=${PORT_MIN}
+Downloads\SavePath=/home/${USERNAME}/downloads
+Downloads\TempPath=/home/${USERNAME}/downloads/temp
+General\Locale=zh
+WebUI\Port=${WEBUI_PORT}
+WebUI\Username=${USERNAME}
+WebUI\Password_ha1=${PASSWORD_HASH}
+WebUI\CSRFProtection=false
+WebUI\ClickjackingProtection=false
+WebUI\LocalHostAuth=true
+WebUI\AuthSubnetWhitelistEnabled=false
+EOF
+
+    # 设置正确的权限
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    chmod 700 /home/${USERNAME}/.config/qBittorrent
+    chmod 600 ${CONFIG_FILE}
+        # 创建服务
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
@@ -122,66 +149,44 @@ Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
 TasksMax=infinity
+Nice=-10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # 先停止可能运行的服务
-    systemctl stop qbittorrent-nox@${USERNAME} 2>/dev/null
-    sleep 2
+    # 验证配置文件
+    echo -e "${CYAN}验证配置文件...${PLAIN}"
+    if [ -f "${CONFIG_FILE}" ]; then
+        echo -e "${GREEN}配置文件存在${PLAIN}"
+        
+        # 检查关键配置项
+        USERNAME_CHECK=$(grep "WebUI\\\\Username" ${CONFIG_FILE} | cut -d= -f2)
+        PASSWORD_CHECK=$(grep "WebUI\\\\Password_ha1" ${CONFIG_FILE} | cut -d= -f2)
+        
+        echo -e "${YELLOW}检查配置：${PLAIN}"
+        echo -e "用户名设置：${USERNAME_CHECK}"
+        echo -e "密码哈希：${PASSWORD_CHECK}"
+        echo -e "预期密码哈希：${PASSWORD_HASH}"
+        
+        if [ "${USERNAME_CHECK}" = "${USERNAME}" ] && [ "${PASSWORD_CHECK}" = "${PASSWORD_HASH}" ]; then
+            echo -e "${GREEN}配置文件验证成功${PLAIN}"
+        else
+            echo -e "${RED}配置文件验证失败${PLAIN}"
+            echo -e "${YELLOW}配置文件内容：${PLAIN}"
+            cat ${CONFIG_FILE}
+            exit 1
+        fi
+    else
+        echo -e "${RED}配置文件不存在${PLAIN}"
+        exit 1
+    fi
 
-    # 确保目录存在并设置权限
-    mkdir -p /home/${USERNAME}/.config/qBittorrent
-    mkdir -p /home/${USERNAME}/downloads
-    mkdir -p /home/${USERNAME}/downloads/temp
-    mkdir -p /home/${USERNAME}/.config/qBittorrent/logs
-    
-    # 生成初始配置文件
-    cat > /home/${USERNAME}/.config/qBittorrent/qBittorrent.conf << EOF
-[LegalNotice]
-Accepted=true
-
-[Network]
-Cookies=@Invalid()
-
-[Preferences]
-Connection\PortRangeMin=${PORT_MIN}
-Downloads\SavePath=/home/${USERNAME}/downloads
-Downloads\TempPath=/home/${USERNAME}/downloads/temp
-WebUI\Address=*
-WebUI\AlternativeUIEnabled=false
-WebUI\AuthSubnetWhitelistEnabled=false
-WebUI\CSRFProtection=false
-WebUI\ClickjackingProtection=false
-WebUI\LocalHostAuth=true
-WebUI\Port=${WEBUI_PORT}
-WebUI\RootFolder=
-WebUI\ServerDomains=*
-WebUI\Username=${USERNAME}
-WebUI\Password_ha1=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
-EOF
-
-    # 设置权限
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-    chmod 700 /home/${USERNAME}/.config/qBittorrent
-    chmod 600 /home/${USERNAME}/.config/qBittorrent/qBittorrent.conf
-
-    # 启动服务
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
     systemctl start qbittorrent-nox@${USERNAME}
-
-    # 等待服务启动
-    echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 10
-
-    # 验证服务状态
-    if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
-        echo -e "${RED}服务启动失败，请检查日志：${PLAIN}"
-        journalctl -u qbittorrent-nox@${USERNAME} -n 50 --no-pager
-        exit 1
-    fi
 }
 # 系统优化
 optimize_system() {
@@ -233,8 +238,7 @@ uninstall_qbittorrent() {
     rm -f /etc/systemd/system/qbittorrent-nox@.service
     
     show_progress 2 "清理配置"
-    echo -e "${BLUE}是否删除配置文件和下载目录？[y/n]: ${PLAIN}"
-    read choice
+    read -p "$(echo -e ${BLUE}是否删除配置文件和下载目录？(y/n): ${PLAIN})" choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
         rm -rf /home/${DEFAULT_USER}/.local/share/data/qBittorrent
@@ -242,8 +246,7 @@ uninstall_qbittorrent() {
     fi
     
     show_progress 2 "删除用户"
-    echo -e "${BLUE}是否删除用户 ${DEFAULT_USER}？[y/n]: ${PLAIN}"
-    read choice
+    read -p "$(echo -e ${BLUE}是否删除用户 ${DEFAULT_USER}？(y/n): ${PLAIN})" choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         userdel -r ${DEFAULT_USER} 2>/dev/null
     fi
@@ -254,6 +257,34 @@ uninstall_qbittorrent() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
     echo -e "${GREEN} Wait 定制版 qBittorrent 已完全卸载！${PLAIN}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+}
+
+# 显示菜单
+show_menu() {
+    echo -e "
+    ${GREEN}Wait 定制版 qBittorrent 管理脚本${PLAIN}
+    ————————————————
+    ${GREEN}1.${PLAIN} 安装/更新 qBittorrent
+    ${GREEN}2.${PLAIN} 卸载 qBittorrent
+    ${GREEN}0.${PLAIN} 退出脚本
+    "
+    echo && read -p "请输入选择 [0-2]: " num
+
+    case "${num}" in
+        1) 
+            check_installed
+            install_and_configure 
+            ;;
+        2) 
+            uninstall_qbittorrent 
+            ;;
+        0) 
+            exit 0 
+            ;;
+        *) 
+            echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 
+            ;;
+    esac
 }
 
 # 安装和配置函数
@@ -287,34 +318,6 @@ install_and_configure() {
     
     sleep 20
     reboot
-}
-
-# 显示菜单
-show_menu() {
-    echo -e "
-    ${GREEN}Wait 定制版 qBittorrent 管理脚本${PLAIN}
-    ————————————————
-    ${GREEN}1.${PLAIN} 安装/更新 qBittorrent
-    ${GREEN}2.${PLAIN} 卸载 qBittorrent
-    ${GREEN}0.${PLAIN} 退出脚本
-    "
-    echo && read -p "请输入选择 [0-2]: " num
-
-    case "${num}" in
-        1) 
-            check_installed
-            install_and_configure 
-            ;;
-        2) 
-            uninstall_qbittorrent 
-            ;;
-        0) 
-            exit 0 
-            ;;
-        *) 
-            echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 
-            ;;
-    esac
 }
 
 # 主函数
