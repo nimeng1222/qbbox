@@ -19,7 +19,7 @@ PLAIN='\033[0m'
 show_progress() {
     local duration=$1
     local prefix=$2
-    local width=20  # 减少宽度使进度条更快
+    local width=20
     local fill="━"
     local empty="═"
     
@@ -71,15 +71,34 @@ install_qbittorrent() {
     
     cd /usr/local/bin/
     echo -e "${CYAN}下载 qBittorrent...${PLAIN}"
-    show_progress 3 "下载文件"
-    wget -q -O qbittorrent-nox "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     
-    if [ $? -ne 0 ]; then
+    # 定义下载链接
+    MAIN_URL="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
+    PROXY_URL="https://ghproxy.com/${MAIN_URL}"
+    
+    # 尝试主链接下载
+    echo -e "${YELLOW}尝试从主链接下载...${PLAIN}"
+    if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${MAIN_URL}"; then
         echo -e "${YELLOW}主链接下载失败，尝试代理下载...${PLAIN}"
-        wget -q -O qbittorrent-nox "https://ghproxy.com/https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
+        if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${PROXY_URL}"; then
+            echo -e "${RED}下载失败！尝试备用链接...${PLAIN}"
+            # 备用链接
+            BACKUP_URL="https://cdn.jsdelivr.net/gh/userdocs/qbittorrent-nox-static@release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
+            if ! wget --no-check-certificate --show-progress -q -O qbittorrent-nox "${BACKUP_URL}"; then
+                echo -e "${RED}所有下载尝试均失败，请检查网络连接！${PLAIN}"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # 验证下载文件
+    if [ ! -f "qbittorrent-nox" ] || [ ! -s "qbittorrent-nox" ]; then
+        echo -e "${RED}下载文件不存在或大小为0，安装失败！${PLAIN}"
+        exit 1
     fi
     
     chmod +x qbittorrent-nox
+    echo -e "${GREEN}下载完成！${PLAIN}"
 
     show_progress 2 "创建用户"
     if ! id "${USERNAME}" >/dev/null 2>&1; then
@@ -102,31 +121,33 @@ Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
 TasksMax=infinity
-Nice=-10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=0
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
+    # 先停止可能运行的服务
+    systemctl stop qbittorrent-nox@${USERNAME} 2>/dev/null
+    sleep 2
 
-    # 生成密码哈希（使用 qBittorrent 的标准格式）
-    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
-    
-    # 配置文件
-    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
-    
-    # 确保目录存在
+    # 确保目录存在并设置权限
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
+    mkdir -p /home/${USERNAME}/.config/qBittorrent/logs
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    chmod 700 /home/${USERNAME}/.config/qBittorrent
+        # 生成密码哈希
+    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
+    # 配置文件路径
+    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
+
     # 生成配置文件
     cat > ${CONFIG_FILE} << EOF
-[AutoRun]
-enabled=false
+[Application]
+FileLogger\Enabled=true
+FileLogger\Path=/home/${USERNAME}/.config/qBittorrent/logs
 
 [BitTorrent]
 Session\DefaultSavePath=/home/${USERNAME}/downloads
@@ -136,13 +157,8 @@ Session\TempPath=/home/${USERNAME}/downloads/temp
 [LegalNotice]
 Accepted=true
 
-[Meta]
-MigrationVersion=4
-
-[Network]
-Cookies=@Invalid()
-
 [Preferences]
+Connection\PortRangeMin=${PORT_MIN}
 General\Locale=zh
 WebUI\Address=*
 WebUI\AlternativeUIEnabled=false
@@ -156,47 +172,27 @@ WebUI\ServerDomains=*
 WebUI\Username=${USERNAME}
 WebUI\Password_ha1=${PASSWORD_HASH}
 EOF
-    # 设置权限
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-    chmod 700 /home/${USERNAME}/.config/qBittorrent
+
+    # 设置配置文件权限
+    chown ${USERNAME}:${USERNAME} ${CONFIG_FILE}
     chmod 600 ${CONFIG_FILE}
 
     # 启动服务
+    systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
     systemctl start qbittorrent-nox@${USERNAME}
 
-    # 等待服务完全启动
+    # 等待服务启动
     echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 15
+    sleep 30  # 增加等待时间到30秒
 
-    # 验证配置文件
-    echo -e "${CYAN}验证配置文件...${PLAIN}"
-    if [ -f "${CONFIG_FILE}" ]; then
-        echo -e "${GREEN}配置文件存在${PLAIN}"
-        
-        # 检查关键配置项
-        USERNAME_CHECK=$(grep "WebUI\\\\Username" ${CONFIG_FILE} | cut -d= -f2)
-        PASSWORD_CHECK=$(grep "WebUI\\\\Password_ha1" ${CONFIG_FILE} | cut -d= -f2)
-        
-        echo -e "${YELLOW}检查配置：${PLAIN}"
-        echo -e "用户名设置：${USERNAME_CHECK}"
-        echo -e "密码哈希：${PASSWORD_CHECK}"
-        echo -e "预期密码哈希：${PASSWORD_HASH}"
-        
-        if [ "${USERNAME_CHECK}" = "${USERNAME}" ] && [ "${PASSWORD_CHECK}" = "${PASSWORD_HASH}" ]; then
-            echo -e "${GREEN}配置文件验证成功${PLAIN}"
-        else
-            echo -e "${RED}配置文件验证失败${PLAIN}"
-            echo -e "${YELLOW}配置文件内容：${PLAIN}"
-            cat ${CONFIG_FILE}
-            exit 1
-        fi
-    else
-        echo -e "${RED}配置文件不存在${PLAIN}"
+    # 检查服务状态
+    if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
+        echo -e "${RED}服务启动失败，请检查日志：${PLAIN}"
+        journalctl -u qbittorrent-nox@${USERNAME} -n 50 --no-pager
         exit 1
     fi
 }
-
 # 系统优化
 optimize_system() {
     echo -e "${CYAN}优化系统设置...${PLAIN}"
@@ -230,6 +226,7 @@ EOF
 
     sysctl -p > /dev/null 2>&1
 }
+
 # 卸载函数
 uninstall_qbittorrent() {
     clear
@@ -269,6 +266,39 @@ uninstall_qbittorrent() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
 }
 
+# 安装和配置函数
+install_and_configure() {
+    get_user_input
+    install_qbittorrent
+    optimize_system
+
+    # 获取公网 IP
+    IP=$(curl -s ip.sb)
+    
+    clear
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${GREEN} Wait 定制版 qBittorrent 安装成功！${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e ""
+    echo -e "${YELLOW} WebUI 信息：${PLAIN}"
+    echo -e "${GREEN} 访问地址：${PLAIN}${BLUE}http://${IP}:${WEBUI_PORT}${PLAIN}"
+    echo -e "${GREEN} 用户名：${PLAIN}${BLUE}${USERNAME}${PLAIN}"
+    echo -e "${GREEN} 密码：${PLAIN}${BLUE}${PASSWORD}${PLAIN}"
+    echo -e "${GREEN} 下载目录：${PLAIN}${BLUE}/home/${USERNAME}/downloads${PLAIN}"
+    echo -e ""
+    echo -e "${YELLOW} 定制优化：${PLAIN}"
+    echo -e "${GREEN} - 自动配置最佳性能参数${PLAIN}"
+    echo -e "${GREEN} - 优化系统网络设置${PLAIN}"
+    echo -e "${GREEN} - Wait 专属优化配置${PLAIN}"
+    echo -e ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${YELLOW} 系统将在 20 秒后重启...${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    
+    sleep 20
+    reboot
+}
+
 # 显示菜单
 show_menu() {
     echo -e "
@@ -295,69 +325,6 @@ show_menu() {
             echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 
             ;;
     esac
-}
-
-# 安装和配置函数
-install_and_configure() {
-    get_user_input
-    install_qbittorrent
-    optimize_system
-
-    # 获取公网 IP
-    IP=$(curl -s ip.sb)
-    
-    # 验证服务状态
-    if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
-        echo -e "${RED}服务未能正常启动，请检查日志：${PLAIN}"
-        journalctl -u qbittorrent-nox@${USERNAME} -n 50
-        exit 1
-    fi
-    
-    # 验证登录
-    echo -e "${YELLOW}验证登录...${PLAIN}"
-    LOGIN_TEST=$(curl -s -i --header "Referer: http://${IP}:${WEBUI_PORT}" \
-                        --data "username=${USERNAME}&password=${PASSWORD}" \
-                        "http://${IP}:${WEBUI_PORT}/api/v2/auth/login")
-    
-    if echo "$LOGIN_TEST" | grep -q "Ok."; then
-        echo -e "${GREEN}登录验证成功！${PLAIN}"
-        echo -e "${GREEN}用户名: ${USERNAME}${PLAIN}"
-        echo -e "${GREEN}密码: ${PASSWORD}${PLAIN}"
-    else
-        echo -e "${RED}登录验证失败！${PLAIN}"
-        echo -e "${YELLOW}服务可能需要更多时间启动，或配置有误${PLAIN}"
-        echo -e "${YELLOW}请检查日志：${PLAIN}"
-        journalctl -u qbittorrent-nox@${USERNAME} -n 50
-        
-        echo -e "${YELLOW}是否仍要继续？[y/n]${PLAIN}"
-        read -p "" choice
-        if [[ $choice != "y" && $choice != "Y" ]]; then
-            exit 1
-        fi
-    fi
-    
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
-    echo -e "${GREEN} Wait 定制版 qBittorrent 安装成功！${PLAIN}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
-    echo -e ""
-    echo -e "${YELLOW} WebUI 信息：${PLAIN}"
-    echo -e "${GREEN} 访问地址：${PLAIN}${BLUE}http://${IP}:${WEBUI_PORT}${PLAIN}"
-    echo -e "${GREEN} 用户名：${PLAIN}${BLUE}${USERNAME}${PLAIN}"
-    echo -e "${GREEN} 密码：${PLAIN}${BLUE}${PASSWORD}${PLAIN}"
-    echo -e "${GREEN} 下载目录：${PLAIN}${BLUE}/home/${USERNAME}/downloads${PLAIN}"
-    echo -e ""
-    echo -e "${YELLOW} 定制优化：${PLAIN}"
-    echo -e "${GREEN} - 自动配置最佳性能参数${PLAIN}"
-    echo -e "${GREEN} - 优化系统网络设置${PLAIN}"
-    echo -e "${GREEN} - Wait 专属优化配置${PLAIN}"
-    echo -e ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
-    echo -e "${YELLOW} 系统将在 20 秒后重启...${PLAIN}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
-    
-    sleep 20
-    reboot
 }
 
 # 主函数
