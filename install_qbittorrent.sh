@@ -101,14 +101,25 @@ main() {
     echo "配置 qBittorrent 设置..."
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
+    # 等待配置文件创建
+    while [ ! -f "${CONFIG_FILE}" ]; do
+        sleep 1
+    done
+
+    # 确保 [Preferences] 部分存在
+    if ! grep -q "\[Preferences\]" "${CONFIG_FILE}"; then
+        echo -e "\n[Preferences]" >> "${CONFIG_FILE}"
+    fi
+
+    # 修改配置
+    sed -i '/^Advanced\\DiskCache=/d' "${CONFIG_FILE}"  # 删除已存在的磁盘缓存设置
+    sed -i '/\[Preferences\]/a Advanced\\DiskCache=-1' "${CONFIG_FILE}"
+    
     sed -i "s/WebUI\\\\Port=[0-9]*/WebUI\\\\Port=${WEBUI_PORT}/" "${CONFIG_FILE}"
     sed -i "s/Connection\\\\PortRangeMin=[0-9]*/Connection\\\\PortRangeMin=${PORT_MIN}/" "${CONFIG_FILE}"
-    
-    # 添加新的配置项
     sed -i '/\[Preferences\]/a General\\Locale=zh' "${CONFIG_FILE}"
     sed -i '/\[Preferences\]/a Downloads\\PreAllocation=false' "${CONFIG_FILE}"
     sed -i '/\[Preferences\]/a WebUI\\CSRFProtection=false' "${CONFIG_FILE}"
-    sed -i '/\[Preferences\]/a Advanced\\DiskCache=-1' "${CONFIG_FILE}"
 
     # 添加开机自启动并重启
     echo "配置开机自启动..."
