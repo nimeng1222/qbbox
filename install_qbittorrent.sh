@@ -62,6 +62,7 @@ get_user_input() {
     WEBUI_PORT=${input_port:-${WEBUI_PORT}}
     echo
 }
+
 # 安装 qBittorrent
 install_qbittorrent() {
     echo -e "${CYAN}开始安装 qBittorrent...${PLAIN}"
@@ -107,47 +108,16 @@ install_qbittorrent() {
 
     show_progress 2 "配置服务"
     
-    # 创建密码更新脚本
-    PASSWORD_UPDATE_SCRIPT="/usr/local/bin/update_qbittorrent_password.sh"
-
-    cat > ${PASSWORD_UPDATE_SCRIPT} << EOF
-#!/bin/bash
-
-USERNAME="${USERNAME}"
-PASSWORD="${PASSWORD}"
-CONFIG_FILE="/home/\${USERNAME}/.config/qBittorrent/qBittorrent.conf"
-
-# 等待配置文件存在
-for i in {1..30}; do
-    if [ -f "\${CONFIG_FILE}" ]; then
-        break
-    fi
-    sleep 1
-done
-
-# 生成密码哈希
-PASSWORD_HASH=\$(echo -n "\${USERNAME}:qBittorrent:\${PASSWORD}" | md5sum | cut -d ' ' -f 1)
-
-# 更新配置文件中的密码哈希
-sed -i "s/WebUI\\\\Password_ha1=.*/WebUI\\\\Password_ha1=\${PASSWORD_HASH}/" \${CONFIG_FILE}
-
-# 设置正确的权限
-chown \${USERNAME}:\${USERNAME} \${CONFIG_FILE}
-chmod 600 \${CONFIG_FILE}
-EOF
-
-    chmod +x ${PASSWORD_UPDATE_SCRIPT}
-        # 创建服务文件
+    # 创建服务文件
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
 After=network.target
 
 [Service]
-Type=forking
+Type=simple
 User=%i
-ExecStart=/usr/local/bin/qbittorrent-nox -d --webui-port=${WEBUI_PORT}
-ExecStartPost=/usr/local/bin/update_qbittorrent_password.sh
+ExecStart=/usr/local/bin/qbittorrent-nox
 Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
@@ -166,32 +136,19 @@ EOF
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
     mkdir -p /home/${USERNAME}/.config/qBittorrent/logs
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-    chmod 700 /home/${USERNAME}/.config/qBittorrent
-
-    # 生成密码哈希
-    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
-    # 配置文件路径
-    CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
-
-    # 生成配置文件
-    cat > ${CONFIG_FILE} << EOF
-[Application]
-FileLogger\Enabled=true
-FileLogger\Path=/home/${USERNAME}/.config/qBittorrent/logs
-
-[BitTorrent]
-Session\DefaultSavePath=/home/${USERNAME}/downloads
-Session\Port=${PORT_MIN}
-Session\TempPath=/home/${USERNAME}/downloads/temp
-
+    # 生成初始配置文件
+    cat > /home/${USERNAME}/.config/qBittorrent/qBittorrent.conf << EOF
 [LegalNotice]
 Accepted=true
 
+[Network]
+Cookies=@Invalid()
+
 [Preferences]
 Connection\PortRangeMin=${PORT_MIN}
-General\Locale=zh
+Downloads\SavePath=/home/${USERNAME}/downloads
+Downloads\TempPath=/home/${USERNAME}/downloads/temp
 WebUI\Address=*
 WebUI\AlternativeUIEnabled=false
 WebUI\AuthSubnetWhitelistEnabled=false
@@ -202,12 +159,13 @@ WebUI\Port=${WEBUI_PORT}
 WebUI\RootFolder=
 WebUI\ServerDomains=*
 WebUI\Username=${USERNAME}
-WebUI\Password_ha1=${PASSWORD_HASH}
+WebUI\Password_ha1=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
 EOF
 
-    # 设置配置文件权限
-    chown ${USERNAME}:${USERNAME} ${CONFIG_FILE}
-    chmod 600 ${CONFIG_FILE}
+    # 设置权限
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    chmod 700 /home/${USERNAME}/.config/qBittorrent
+    chmod 600 /home/${USERNAME}/.config/qBittorrent/qBittorrent.conf
 
     # 启动服务
     systemctl daemon-reload
@@ -216,9 +174,9 @@ EOF
 
     # 等待服务启动
     echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 30  # 增加等待时间到30秒
+    sleep 10
 
-    # 检查服务状态
+    # 验证服务状态
     if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
         echo -e "${RED}服务启动失败，请检查日志：${PLAIN}"
         journalctl -u qbittorrent-nox@${USERNAME} -n 50 --no-pager
@@ -272,7 +230,6 @@ uninstall_qbittorrent() {
     
     show_progress 2 "删除文件"
     rm -f /usr/local/bin/qbittorrent-nox
-    rm -f /usr/local/bin/update_qbittorrent_password.sh
     rm -f /etc/systemd/system/qbittorrent-nox@.service
     
     show_progress 2 "清理配置"
