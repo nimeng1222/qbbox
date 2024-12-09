@@ -100,8 +100,8 @@ install_qbittorrent() {
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
     
-    # 生成密码哈希（使用新的方式）
-    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+    # 生成密码哈希（使用简单的 MD5）
+    PASSWORD_HASH=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
@@ -111,24 +111,33 @@ install_qbittorrent() {
 [AutoRun]
 enabled=false
 
+[BitTorrent]
+Session\DefaultSavePath=/home/${USERNAME}/downloads
+Session\Port=${PORT_MIN}
+Session\TempPath=/home/${USERNAME}/downloads/temp
+
 [LegalNotice]
 Accepted=true
+
+[Meta]
+MigrationVersion=4
 
 [Network]
 Cookies=@Invalid()
 
 [Preferences]
-Connection\PortRangeMin=${PORT_MIN}
-Downloads\SavePath=/home/${USERNAME}/downloads
-Downloads\TempPath=/home/${USERNAME}/downloads/temp
 General\Locale=zh
-WebUI\Port=${WEBUI_PORT}
-WebUI\Username=${USERNAME}
-WebUI\Password_ha1=${PASSWORD_HASH}
+WebUI\Address=*
+WebUI\AlternativeUIEnabled=false
+WebUI\AuthSubnetWhitelistEnabled=false
 WebUI\CSRFProtection=false
 WebUI\ClickjackingProtection=false
 WebUI\LocalHostAuth=true
-WebUI\AuthSubnetWhitelistEnabled=false
+WebUI\Port=${WEBUI_PORT}
+WebUI\RootFolder=
+WebUI\ServerDomains=*
+WebUI\Username=${USERNAME}
+WebUI\Password_ha1=${PASSWORD_HASH}
 EOF
 
     # 设置正确的权限
@@ -295,6 +304,40 @@ install_and_configure() {
 
     # 获取公网 IP
     IP=$(curl -s ip.sb)
+    
+    # 等待服务完全启动
+    echo -e "${YELLOW}等待服务启动...${PLAIN}"
+    sleep 5
+    
+    # 验证服务状态
+    if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
+        echo -e "${RED}服务未能正常启动，请检查日志：${PLAIN}"
+        journalctl -u qbittorrent-nox@${USERNAME} -n 50
+        exit 1
+    fi
+    
+    # 验证登录
+    echo -e "${YELLOW}验证登录...${PLAIN}"
+    LOGIN_TEST=$(curl -s -i --header "Referer: http://${IP}:${WEBUI_PORT}" \
+                        --data "username=${USERNAME}&password=${PASSWORD}" \
+                        "http://${IP}:${WEBUI_PORT}/api/v2/auth/login")
+    
+    if echo "$LOGIN_TEST" | grep -q "Ok."; then
+        echo -e "${GREEN}登录验证成功！${PLAIN}"
+        echo -e "${GREEN}用户名: ${USERNAME}${PLAIN}"
+        echo -e "${GREEN}密码: ${PASSWORD}${PLAIN}"
+    else
+        echo -e "${RED}登录验证失败！${PLAIN}"
+        echo -e "${YELLOW}服务可能需要更多时间启动，或配置有误${PLAIN}"
+        echo -e "${YELLOW}请检查日志：${PLAIN}"
+        journalctl -u qbittorrent-nox@${USERNAME} -n 50
+        
+        echo -e "${YELLOW}是否仍要继续？[y/n]${PLAIN}"
+        read -p "" choice
+        if [[ $choice != "y" && $choice != "Y" ]]; then
+            exit 1
+        fi
+    fi
     
     clear
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
