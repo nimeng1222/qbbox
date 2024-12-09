@@ -135,7 +135,7 @@ EOF
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
     chmod 600 ${CONFIG_FILE}
-        # 创建服务
+        # 创建服务文件 - 更新这里，添加 --profile 参数
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
@@ -144,7 +144,7 @@ After=network.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/usr/local/bin/qbittorrent-nox
+ExecStart=/usr/local/bin/qbittorrent-nox --profile=/home/%i/.config --webui-port=${WEBUI_PORT}
 Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
@@ -187,6 +187,17 @@ EOF
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
     systemctl start qbittorrent-nox@${USERNAME}
+    
+    # 等待服务启动
+    echo -e "${YELLOW}等待服务启动...${PLAIN}"
+    sleep 10
+    
+    # 检查服务状态
+    if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
+        echo -e "${RED}服务启动失败，请检查日志：${PLAIN}"
+        journalctl -u qbittorrent-nox@${USERNAME} -n 50 --no-pager
+        exit 1
+    fi
 }
 # 系统优化
 optimize_system() {
