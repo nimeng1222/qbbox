@@ -87,13 +87,21 @@ install_qbittorrent() {
     fi
 
     show_progress 2 "配置服务"
+    
+    # 先停止可能运行的实例
+    systemctl stop qbittorrent-nox@${USERNAME} 2>/dev/null
+    
+    # 删除可能存在的旧配置
+    rm -rf /home/${USERNAME}/.config/qBittorrent
+    rm -rf /home/${USERNAME}/.local/share/qBittorrent
+    
     # 创建必要的目录
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
     
-    # 生成密码哈希
-    PASSWORD_HASH=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+    # 生成密码哈希（使用新的方式）
+    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
@@ -110,56 +118,24 @@ Accepted=true
 Cookies=@Invalid()
 
 [Preferences]
-Advanced\AutoBanUnknownPeer=true
-Advanced\RecheckOnCompletion=false
-Advanced\trackerPort=9000
-Bittorrent\MaxConnecs=-1
-Bittorrent\MaxConnecsPerTorrent=-1
-Bittorrent\MaxRatioAction=0
-Bittorrent\MaxUploads=-1
-Bittorrent\MaxUploadsPerTorrent=-1
-Connection\GlobalDLLimit=0
-Connection\GlobalDLLimitAlt=0
-Connection\GlobalUPLimit=0
-Connection\GlobalUPLimitAlt=0
 Connection\PortRangeMin=${PORT_MIN}
-Downloads\DiskWriteCacheSize=-1
-Downloads\PreAllocation=false
 Downloads\SavePath=/home/${USERNAME}/downloads
 Downloads\TempPath=/home/${USERNAME}/downloads/temp
 General\Locale=zh
-Queueing\QueueingEnabled=false
-WebUI\Address=*
-WebUI\AlternativeUIEnabled=false
-WebUI\AuthSubnetWhitelist=@Invalid()
-WebUI\AuthSubnetWhitelistEnabled=false
-WebUI\BanDuration=3600
-WebUI\CSRFProtection=false
-WebUI\ClickjackingProtection=true
-WebUI\CustomHTTPHeaders=
-WebUI\CustomHTTPHeadersEnabled=false
-WebUI\HTTPS\CertificatePath=
-WebUI\HTTPS\Enabled=false
-WebUI\HTTPS\KeyPath=
-WebUI\HostHeaderValidation=true
-WebUI\LocalHostAuth=true
-WebUI\MaxAuthenticationFailCount=5
 WebUI\Port=${WEBUI_PORT}
-WebUI\ReverseProxySupportEnabled=false
-WebUI\RootFolder=
-WebUI\SecureCookie=true
-WebUI\ServerDomains=*
-WebUI\SessionTimeout=3600
-WebUI\UseUPnP=true
 WebUI\Username=${USERNAME}
 WebUI\Password_ha1=${PASSWORD_HASH}
+WebUI\CSRFProtection=false
+WebUI\ClickjackingProtection=false
+WebUI\LocalHostAuth=true
+WebUI\AuthSubnetWhitelistEnabled=false
 EOF
+
     # 设置正确的权限
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
     chmod 600 ${CONFIG_FILE}
-
-    # 创建服务
+        # 创建服务
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
@@ -181,31 +157,32 @@ IOSchedulingPriority=0
 WantedBy=multi-user.target
 EOF
 
-# 验证配置文件
-echo -e "${CYAN}验证配置文件...${PLAIN}"
-if [ -f "${CONFIG_FILE}" ]; then
-    echo -e "${GREEN}配置文件存在${PLAIN}"
-    
-    # 检查关键配置项
-    USERNAME_CHECK=$(grep "WebUI\\\\Username" ${CONFIG_FILE} | cut -d= -f2)
-    PASSWORD_CHECK=$(grep "WebUI\\\\Password_ha1" ${CONFIG_FILE} | cut -d= -f2)
-    
-    echo -e "${YELLOW}检查配置：${PLAIN}"
-    echo -e "用户名设置：${USERNAME_CHECK}"
-    echo -e "密码哈希：${PASSWORD_CHECK}"
-    
-    if [ "${USERNAME_CHECK}" = "${USERNAME}" ] && [ -n "${PASSWORD_CHECK}" ]; then
-        echo -e "${GREEN}配置文件验证成功${PLAIN}"
+    # 验证配置文件
+    echo -e "${CYAN}验证配置文件...${PLAIN}"
+    if [ -f "${CONFIG_FILE}" ]; then
+        echo -e "${GREEN}配置文件存在${PLAIN}"
+        
+        # 检查关键配置项
+        USERNAME_CHECK=$(grep "WebUI\\\\Username" ${CONFIG_FILE} | cut -d= -f2)
+        PASSWORD_CHECK=$(grep "WebUI\\\\Password_ha1" ${CONFIG_FILE} | cut -d= -f2)
+        
+        echo -e "${YELLOW}检查配置：${PLAIN}"
+        echo -e "用户名设置：${USERNAME_CHECK}"
+        echo -e "密码哈希：${PASSWORD_CHECK}"
+        echo -e "预期密码哈希：${PASSWORD_HASH}"
+        
+        if [ "${USERNAME_CHECK}" = "${USERNAME}" ] && [ "${PASSWORD_CHECK}" = "${PASSWORD_HASH}" ]; then
+            echo -e "${GREEN}配置文件验证成功${PLAIN}"
+        else
+            echo -e "${RED}配置文件验证失败${PLAIN}"
+            echo -e "${YELLOW}配置文件内容：${PLAIN}"
+            cat ${CONFIG_FILE}
+            exit 1
+        fi
     else
-        echo -e "${RED}配置文件验证失败${PLAIN}"
-        echo -e "${YELLOW}配置文件内容：${PLAIN}"
-        cat ${CONFIG_FILE}
+        echo -e "${RED}配置文件不存在${PLAIN}"
         exit 1
     fi
-else
-    echo -e "${RED}配置文件不存在${PLAIN}"
-    exit 1
-fi
 
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${USERNAME}
