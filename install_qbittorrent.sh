@@ -144,10 +144,10 @@ Description=qBittorrent-nox service for %i
 After=network.target
 
 [Service]
-Type=simple
+Type=forking
 User=%i
-ExecStartPre=${PASSWORD_UPDATE_SCRIPT}
-ExecStart=/usr/local/bin/qbittorrent-nox
+ExecStart=/usr/local/bin/qbittorrent-nox -d --webui-port=${WEBUI_PORT}
+ExecStartPost=/usr/local/bin/update_qbittorrent_password.sh
 Restart=always
 LimitNOFILE=1048576
 LimitNPROC=infinity
