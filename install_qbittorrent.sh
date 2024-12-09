@@ -62,7 +62,6 @@ get_user_input() {
     WEBUI_PORT=${input_port:-${WEBUI_PORT}}
     echo
 }
-
 # 安装 qBittorrent
 install_qbittorrent() {
     echo -e "${CYAN}开始安装 qBittorrent...${PLAIN}"
@@ -79,7 +78,8 @@ install_qbittorrent() {
         echo -e "${YELLOW}主链接下载失败，尝试代理下载...${PLAIN}"
         wget -q -O qbittorrent-nox "https://ghproxy.com/https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-4.3.8_v1.2.14/x86_64-cmake-qbittorrent-nox"
     fi
-        chmod +x qbittorrent-nox
+    
+    chmod +x qbittorrent-nox
 
     show_progress 2 "创建用户"
     if ! id "${USERNAME}" >/dev/null 2>&1; then
@@ -91,6 +91,9 @@ install_qbittorrent() {
     mkdir -p /home/${USERNAME}/.config/qBittorrent
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
+    
+    # 生成密码哈希
+    PASSWORD_HASH=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
@@ -149,9 +152,8 @@ WebUI\ServerDomains=*
 WebUI\SessionTimeout=3600
 WebUI\UseUPnP=true
 WebUI\Username=${USERNAME}
-WebUI\Password_ha1=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+WebUI\Password_ha1=${PASSWORD_HASH}
 EOF
-
     # 设置正确的权限
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
@@ -181,11 +183,23 @@ EOF
 
     # 验证配置文件
     echo -e "${CYAN}验证配置文件...${PLAIN}"
-    if grep -q "WebUI\Username=${USERNAME}" ${CONFIG_FILE} && \
-       grep -q "WebUI\Password_ha1=" ${CONFIG_FILE}; then
-        echo -e "${GREEN}配置文件验证成功${PLAIN}"
+    if [ -f "${CONFIG_FILE}" ]; then
+        echo -e "${GREEN}配置文件存在${PLAIN}"
+        
+        # 检查关键配置项
+        if grep -q "WebUI\\\\Username=${USERNAME}" ${CONFIG_FILE} && \
+           grep -q "WebUI\\\\Password_ha1=${PASSWORD_HASH}" ${CONFIG_FILE}; then
+            echo -e "${GREEN}配置文件验证成功${PLAIN}"
+        else
+            echo -e "${RED}配置文件验证失败${PLAIN}"
+            echo -e "${YELLOW}当前用户名：${USERNAME}${PLAIN}"
+            echo -e "${YELLOW}当前密码哈希：${PASSWORD_HASH}${PLAIN}"
+            echo -e "${YELLOW}配置文件内容：${PLAIN}"
+            cat ${CONFIG_FILE}
+            exit 1
+        fi
     else
-        echo -e "${RED}配置文件验证失败${PLAIN}"
+        echo -e "${RED}配置文件不存在${PLAIN}"
         exit 1
     fi
 
@@ -227,7 +241,6 @@ EOF
 
     sysctl -p > /dev/null 2>&1
 }
-
 # 卸载函数
 uninstall_qbittorrent() {
     clear
