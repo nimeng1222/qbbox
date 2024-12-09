@@ -88,41 +88,42 @@ install_qbittorrent() {
 
     show_progress 2 "配置服务"
     
-    # 先停止可能运行的实例
-    systemctl stop qbittorrent-nox@${USERNAME} 2>/dev/null
-    
-    # 删除可能存在的旧配置
-    rm -rf /home/${USERNAME}/.config/qBittorrent
-    rm -rf /home/${USERNAME}/.local/share/qBittorrent
-    
-    # 创建必要的目录
-    mkdir -p /home/${USERNAME}/.config/qBittorrent
-    mkdir -p /home/${USERNAME}/downloads
-    mkdir -p /home/${USERNAME}/downloads/temp
-    
+    # 创建服务文件
+    cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
+[Unit]
+Description=qBittorrent-nox service for %i
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/qbittorrent-nox
+Restart=always
+LimitNOFILE=1048576
+LimitNPROC=infinity
+TasksMax=infinity
+Nice=-10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+
     # 生成密码哈希（使用 qBittorrent 的标准格式）
     PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
-    # 先创建一个最小配置启动一次
-    cat > ${CONFIG_FILE} << EOF
-[LegalNotice]
-Accepted=true
-
-[Preferences]
-WebUI\Username=${USERNAME}
-WebUI\Password_ha1=${PASSWORD_HASH}
-EOF
-
-    # 启动一次服务让它生成默认配置
-    systemctl start qbittorrent-nox@${USERNAME}
-    sleep 5
-    systemctl stop qbittorrent-nox@${USERNAME}
-    sleep 2
-
-    # 现在更新完整配置
+    # 确保目录存在
+    mkdir -p /home/${USERNAME}/.config/qBittorrent
+    mkdir -p /home/${USERNAME}/downloads
+    mkdir -p /home/${USERNAME}/downloads/temp
+    
+    # 生成配置文件
     cat > ${CONFIG_FILE} << EOF
 [AutoRun]
 enabled=false
@@ -155,32 +156,18 @@ WebUI\ServerDomains=*
 WebUI\Username=${USERNAME}
 WebUI\Password_ha1=${PASSWORD_HASH}
 EOF
-    # 设置正确的权限
+    # 设置权限
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
     chmod 600 ${CONFIG_FILE}
 
-    # 创建服务
-    cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
-[Unit]
-Description=qBittorrent-nox service for %i
-After=network.target
+    # 启动服务
+    systemctl enable qbittorrent-nox@${USERNAME}
+    systemctl start qbittorrent-nox@${USERNAME}
 
-[Service]
-Type=simple
-User=%i
-ExecStart=/usr/local/bin/qbittorrent-nox
-Restart=always
-LimitNOFILE=1048576
-LimitNPROC=infinity
-TasksMax=infinity
-Nice=-10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=0
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    # 等待服务完全启动
+    echo -e "${YELLOW}等待服务启动...${PLAIN}"
+    sleep 15
 
     # 验证配置文件
     echo -e "${CYAN}验证配置文件...${PLAIN}"
@@ -208,10 +195,6 @@ EOF
         echo -e "${RED}配置文件不存在${PLAIN}"
         exit 1
     fi
-
-    systemctl daemon-reload
-    systemctl enable qbittorrent-nox@${USERNAME}
-    systemctl start qbittorrent-nox@${USERNAME}
 }
 
 # 系统优化
@@ -263,7 +246,8 @@ uninstall_qbittorrent() {
     rm -f /etc/systemd/system/qbittorrent-nox@.service
     
     show_progress 2 "清理配置"
-    read -r -p "$(echo -e "${BLUE}是否删除配置文件和下载目录？[y/n]: ${PLAIN}")" choice
+    echo -e "${BLUE}是否删除配置文件和下载目录？[y/n]: ${PLAIN}"
+    read choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
         rm -rf /home/${DEFAULT_USER}/.local/share/data/qBittorrent
@@ -271,7 +255,8 @@ uninstall_qbittorrent() {
     fi
     
     show_progress 2 "删除用户"
-    read -r -p "$(echo -e "${BLUE}是否删除用户 ${DEFAULT_USER}？[y/n]: ${PLAIN}")" choice
+    echo -e "${BLUE}是否删除用户 ${DEFAULT_USER}？[y/n]: ${PLAIN}"
+    read choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         userdel -r ${DEFAULT_USER} 2>/dev/null
     fi
@@ -320,10 +305,6 @@ install_and_configure() {
 
     # 获取公网 IP
     IP=$(curl -s ip.sb)
-    
-    # 等待服务完全启动
-    echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 10
     
     # 验证服务状态
     if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
