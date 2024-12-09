@@ -66,7 +66,7 @@ install_qbittorrent() {
 
     show_progress 2 "创建用户"
     if ! id "${DEFAULT_USER}" >/dev/null 2>&1; then
-        useradd -r -m -s /bin/false ${DEFAULT_USER}
+        useradd -m -s /bin/bash ${DEFAULT_USER}
     fi
 
     show_progress 2 "配置服务"
@@ -74,25 +74,21 @@ install_qbittorrent() {
     # 先停止可能运行的实例
     systemctl stop qbittorrent-nox@${DEFAULT_USER} 2>/dev/null
     
-    # 删除可能存在的旧配置
+    # 删除可能存在的旧配置和目录
     rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
     rm -rf /home/${DEFAULT_USER}/.local/share/qBittorrent
-    
+    rm -rf /home/${DEFAULT_USER}/downloads
+
     # 创建所有必需的目录
     mkdir -p /home/${DEFAULT_USER}/.config/qBittorrent/cache
     mkdir -p /home/${DEFAULT_USER}/.config/qBittorrent/logs
     mkdir -p /home/${DEFAULT_USER}/.local/share/qBittorrent
     mkdir -p /home/${DEFAULT_USER}/downloads
     mkdir -p /home/${DEFAULT_USER}/downloads/temp
-    
+
     # 设置正确的权限
     chown -R ${DEFAULT_USER}:${DEFAULT_USER} /home/${DEFAULT_USER}
-    chmod -R 755 /home/${DEFAULT_USER}/.config
-    chmod -R 755 /home/${DEFAULT_USER}/.local
-    chmod -R 755 /home/${DEFAULT_USER}/downloads
-    
-    # 配置文件
-    CONFIG_FILE="/home/${DEFAULT_USER}/.config/qBittorrent/qBittorrent.conf"
+    chmod -R 755 /home/${DEFAULT_USER}
     
     # 创建服务文件
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
@@ -103,127 +99,59 @@ After=network.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/usr/local/bin/qbittorrent-nox --profile=/home/%i/.config --webui-port=${WEBUI_PORT}
-Restart=always
-LimitNOFILE=1048576
-LimitNPROC=infinity
-TasksMax=infinity
-Nice=-10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=0
+WorkingDirectory=/home/%i
+Environment="XDG_CONFIG_HOME=/home/%i/.config"
+ExecStart=/usr/local/bin/qbittorrent-nox
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    # 创建默认配置文件
+    CONFIG_FILE="/home/${DEFAULT_USER}/.config/qBittorrent/qBittorrent.conf"
+    cat > ${CONFIG_FILE} << EOF
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+WebUI\Port=${WEBUI_PORT}
+WebUI\Username=${DEFAULT_USER}
+WebUI\Password_ha1=$(echo -n "${DEFAULT_USER}:qBittorrent:${DEFAULT_PASS}" | md5sum | cut -d ' ' -f 1)
+Downloads\SavePath=/home/${DEFAULT_USER}/downloads
+Downloads\TempPath=/home/${DEFAULT_USER}/downloads/temp
+Connection\PortRangeMin=${PORT_MIN}
+General\Locale=zh
+WebUI\CSRFProtection=false
+WebUI\ClickjackingProtection=false
+EOF
+
+    # 设置配置文件权限
+    chown ${DEFAULT_USER}:${DEFAULT_USER} ${CONFIG_FILE}
+    chmod 644 ${CONFIG_FILE}
+
+    # 重新加载systemd并启动服务
     systemctl daemon-reload
     systemctl enable qbittorrent-nox@${DEFAULT_USER}
     systemctl start qbittorrent-nox@${DEFAULT_USER}
     
     # 等待服务启动
     echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 10
+    sleep 5
     
-    # 检查服务状态
-    if ! systemctl is-active --quiet qbittorrent-nox@${DEFAULT_USER}; then
+    # 获取服务状态
+    if systemctl is-active --quiet qbittorrent-nox@${DEFAULT_USER}; then
+        echo -e "${GREEN}qBittorrent 安装成功！${PLAIN}"
+        IP=$(curl -s ip.sb)
+        echo -e "${YELLOW}WebUI 访问信息：${PLAIN}"
+        echo -e "地址：${GREEN}http://${IP}:${WEBUI_PORT}${PLAIN}"
+        echo -e "用户名：${GREEN}${DEFAULT_USER}${PLAIN}"
+        echo -e "密码：${GREEN}${DEFAULT_PASS}${PLAIN}"
+    else
         echo -e "${RED}服务启动失败，请检查日志：${PLAIN}"
         journalctl -u qbittorrent-nox@${DEFAULT_USER} -n 50 --no-pager
-        exit 1
-    fi
-
-    # 更新配置文件
-    update_qbittorrent_config
-}
-
-# 更新配置文件函数
-update_qbittorrent_config() {
-    echo -e "${CYAN}更新 qBittorrent 配置文件...${PLAIN}"
-    
-    # 获取用户输入
-    read -p "$(echo -e ${BLUE}请输入用户名 [默认: ${DEFAULT_USER}]: ${PLAIN})" USERNAME
-    USERNAME=${USERNAME:-${DEFAULT_USER}}
-    
-    read -s -p "$(echo -e ${BLUE}请输入密码 [默认: ${DEFAULT_PASS}]: ${PLAIN})" PASSWORD
-    echo
-    PASSWORD=${PASSWORD:-${DEFAULT_PASS}}
-    
-    # 生成新的密码哈希
-    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
-    
-    # 更新配置文件
-    cat > ${CONFIG_FILE} << EOF
-[AutoRun]
-enabled=false
-
-[BitTorrent]
-Session\DefaultSavePath=/home/${DEFAULT_USER}/downloads
-Session\Port=6881
-Session\TempPath=/home/${DEFAULT_USER}/downloads/temp
-
-[Core]
-AutoDeleteAddedTorrentFile=Never
-
-[LegalNotice]
-Accepted=true
-
-[Meta]
-MigrationVersion=4
-
-[Network]
-Cookies=@Invalid()
-PortForwardingEnabled=false
-
-[Preferences]
-Advanced\RecheckOnCompletion=false
-Advanced\trackerPort=9000
-Connection\PortRangeMin=${PORT_MIN}
-Connection\ResolvePeerCountries=true
-Connection\UPnP=false
-Downloads\SavePath=/home/${DEFAULT_USER}/downloads
-Downloads\TempPath=/home/${DEFAULT_USER}/downloads/temp
-General\Locale=zh
-IPFilter\Enabled=false
-IPFilter\File=
-IPFilter\FilterTracker=false
-WebUI\Address=*
-WebUI\AlternativeUIEnabled=false
-WebUI\AuthSubnetWhitelist=@Invalid()
-WebUI\AuthSubnetWhitelistEnabled=false
-WebUI\BanDuration=3600
-WebUI\CSRFProtection=false
-WebUI\ClickjackingProtection=false
-WebUI\CustomHTTPHeaders=
-WebUI\CustomHTTPHeadersEnabled=false
-WebUI\HTTPS\CertificatePath=
-WebUI\HTTPS\Enabled=false
-WebUI\HTTPS\KeyPath=
-WebUI\HostHeaderValidation=true
-WebUI\LocalHostAuth=true
-WebUI\MaxAuthenticationFailCount=5
-WebUI\Password_ha1=${PASSWORD_HASH}
-WebUI\Port=${WEBUI_PORT}
-WebUI\RootFolder=
-WebUI\SecureCookie=true
-WebUI\ServerDomains=*
-WebUI\SessionTimeout=3600
-WebUI\UseUPnP=false
-WebUI\Username=${USERNAME}
-EOF
-
-    # 设置正确的权限
-    chown ${DEFAULT_USER}:${DEFAULT_USER} ${CONFIG_FILE}
-    chmod 600 ${CONFIG_FILE}
-    
-    # 重启服务
-    systemctl restart qbittorrent-nox@${DEFAULT_USER}
-    
-    # 检查服务状态
-    if systemctl is-active --quiet qbittorrent-nox@${DEFAULT_USER}; then
-        echo -e "${GREEN}qBittorrent 配置更新成功并已重启！${PLAIN}"
-    else
-        echo -e "${RED}服务重启失败，请检查日志：${PLAIN}"
-        journalctl -u qbittorrent-nox@${DEFAULT_USER} -n 50 --no-pager
-        exit 1
     fi
 }
 
@@ -246,7 +174,7 @@ uninstall_qbittorrent() {
     read -p "$(echo -e ${BLUE}是否删除配置文件和下载目录？(y/n): ${PLAIN})" choice
     if [[ $choice == "y" || $choice == "Y" ]]; then
         rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
-        rm -rf /home/${DEFAULT_USER}/.local/share/data/qBittorrent
+        rm -rf /home/${DEFAULT_USER}/.local/share/qBittorrent
         rm -rf /home/${DEFAULT_USER}/downloads
     fi
     
