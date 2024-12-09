@@ -78,10 +78,18 @@ install_qbittorrent() {
     rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
     rm -rf /home/${DEFAULT_USER}/.local/share/qBittorrent
     
-    # 创建必要的目录
-    mkdir -p /home/${DEFAULT_USER}/.config/qBittorrent
+    # 创建所有必需的目录
+    mkdir -p /home/${DEFAULT_USER}/.config/qBittorrent/cache
+    mkdir -p /home/${DEFAULT_USER}/.config/qBittorrent/logs
+    mkdir -p /home/${DEFAULT_USER}/.local/share/qBittorrent
     mkdir -p /home/${DEFAULT_USER}/downloads
     mkdir -p /home/${DEFAULT_USER}/downloads/temp
+    
+    # 设置正确的权限
+    chown -R ${DEFAULT_USER}:${DEFAULT_USER} /home/${DEFAULT_USER}
+    chmod -R 755 /home/${DEFAULT_USER}/.config
+    chmod -R 755 /home/${DEFAULT_USER}/.local
+    chmod -R 755 /home/${DEFAULT_USER}/downloads
     
     # 配置文件
     CONFIG_FILE="/home/${DEFAULT_USER}/.config/qBittorrent/qBittorrent.conf"
