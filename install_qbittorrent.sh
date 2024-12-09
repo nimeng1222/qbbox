@@ -100,13 +100,29 @@ install_qbittorrent() {
     mkdir -p /home/${USERNAME}/downloads
     mkdir -p /home/${USERNAME}/downloads/temp
     
-    # 生成密码哈希（使用简单的 MD5）
-    PASSWORD_HASH=$(echo -n "${PASSWORD}" | md5sum | cut -d ' ' -f 1)
+    # 生成密码哈希（使用 qBittorrent 的标准格式）
+    PASSWORD_HASH=$(echo -n "${USERNAME}:qBittorrent:${PASSWORD}" | md5sum | cut -d ' ' -f 1)
     
     # 配置文件
     CONFIG_FILE="/home/${USERNAME}/.config/qBittorrent/qBittorrent.conf"
     
-    # 生成配置文件
+    # 先创建一个最小配置启动一次
+    cat > ${CONFIG_FILE} << EOF
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+WebUI\Username=${USERNAME}
+WebUI\Password_ha1=${PASSWORD_HASH}
+EOF
+
+    # 启动一次服务让它生成默认配置
+    systemctl start qbittorrent-nox@${USERNAME}
+    sleep 5
+    systemctl stop qbittorrent-nox@${USERNAME}
+    sleep 2
+
+    # 现在更新完整配置
     cat > ${CONFIG_FILE} << EOF
 [AutoRun]
 enabled=false
@@ -139,12 +155,12 @@ WebUI\ServerDomains=*
 WebUI\Username=${USERNAME}
 WebUI\Password_ha1=${PASSWORD_HASH}
 EOF
-
     # 设置正确的权限
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     chmod 700 /home/${USERNAME}/.config/qBittorrent
     chmod 600 ${CONFIG_FILE}
-        # 创建服务
+
+    # 创建服务
     cat > /etc/systemd/system/qbittorrent-nox@.service << EOF
 [Unit]
 Description=qBittorrent-nox service for %i
@@ -307,7 +323,7 @@ install_and_configure() {
     
     # 等待服务完全启动
     echo -e "${YELLOW}等待服务启动...${PLAIN}"
-    sleep 5
+    sleep 10
     
     # 验证服务状态
     if ! systemctl is-active --quiet qbittorrent-nox@${USERNAME}; then
