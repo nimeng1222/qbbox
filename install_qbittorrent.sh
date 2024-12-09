@@ -175,24 +175,64 @@ EOF
     sysctl -p > /dev/null 2>&1
 }
 
-# 主函数
-main() {
-    if [ "$EUID" -ne 0 ]; then 
-        echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}"
-        exit 1
-    fi
-
+# 卸载函数
+uninstall_qbittorrent() {
     clear
-    echo -e "${PURPLE}
-    ██╗    ██╗ █████╗ ██╗████████╗    ██████╗ ██████╗ ██╗████████╗
-    ██║    ██║██╔══██╗██║╚══██╔══╝    ██╔══██╗██╔══██╗██║╚══██╔══╝
-    ██║ █╗ ██║███████║██║   ██║       ██████╔╝██████╔╝██║   ██║   
-    ██║███╗██║██╔══██║██║   ██║       ██╔══██╗██╔══██╗██║   ██║   
-    ╚███╔███╔╝██║  ██║██║   ██║       ██████╔╝██████╔╝██║   ██║   
-     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝   ╚═╝       ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   
-                                                     By Wait Team
-    ${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${YELLOW} 开始卸载 Wait 定制版 qBittorrent...${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
     
+    show_progress 2 "停止服务"
+    systemctl stop qbittorrent-nox@${DEFAULT_USER} 2>/dev/null
+    systemctl disable qbittorrent-nox@${DEFAULT_USER} 2>/dev/null
+    
+    show_progress 2 "删除文件"
+    rm -f /usr/local/bin/qbittorrent-nox
+    rm -f /etc/systemd/system/qbittorrent-nox@.service
+    
+    show_progress 2 "清理配置"
+    read -p "$(echo -e ${BLUE}是否删除配置文件和下载目录？(y/n): ${PLAIN})" choice
+    if [[ $choice == "y" || $choice == "Y" ]]; then
+        rm -rf /home/${DEFAULT_USER}/.config/qBittorrent
+        rm -rf /home/${DEFAULT_USER}/.local/share/data/qBittorrent
+        rm -rf /home/${DEFAULT_USER}/downloads
+    fi
+    
+    show_progress 2 "删除用户"
+    read -p "$(echo -e ${BLUE}是否删除用户 ${DEFAULT_USER}？(y/n): ${PLAIN})" choice
+    if [[ $choice == "y" || $choice == "Y" ]]; then
+        userdel -r ${DEFAULT_USER} 2>/dev/null
+    fi
+    
+    systemctl daemon-reload
+    
+    clear
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+    echo -e "${GREEN} Wait 定制版 qBittorrent 已完全卸载！${PLAIN}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${PLAIN}"
+}
+
+# 显示菜单
+show_menu() {
+    echo -e "
+    ${GREEN}Wait 定制版 qBittorrent 管理脚本${PLAIN}
+    ————————————————
+    ${GREEN}1.${PLAIN} 安装 qBittorrent
+    ${GREEN}2.${PLAIN} 卸载 qBittorrent
+    ${GREEN}0.${PLAIN} 退出脚本
+    "
+    echo && read -p "请输入选择 [0-2]: " num
+
+    case "${num}" in
+        1) install_and_configure ;;
+        2) uninstall_qbittorrent ;;
+        0) exit 0 ;;
+        *) echo -e "${RED}请输入正确数字 [0-2]${PLAIN}" && exit 1 ;;
+    esac
+}
+
+# 安装和配置函数
+install_and_configure() {
     get_user_input
     install_qbittorrent
     optimize_system
@@ -222,6 +262,27 @@ main() {
     
     sleep 20
     reboot
+}
+
+# 主函数
+main() {
+    if [ "$EUID" -ne 0 ]; then 
+        echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}"
+        exit 1
+    fi
+
+    clear
+    echo -e "${PURPLE}
+    ██╗    ██╗ █████╗ ██╗████████╗    ██████╗ ██████╗ ██╗████████╗
+    ██║    ██║██╔══██╗██║╚══██╔══╝    ██╔══██╗██╔══██╗██║╚══██╔══╝
+    ██║ █╗ ██║███████║██║   ██║       ██████╔╝██████╔╝██║   ██║   
+    ██║███╗██║██╔══██║██║   ██║       ██╔══██╗██╔══██╗██║   ██║   
+    ╚███╔███╔╝██║  ██║██║   ██║       ██████╔╝██████╔╝██║   ██║   
+     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝   ╚═╝       ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   
+                                                     By Wait Team
+    ${PLAIN}"
+    
+    show_menu
 }
 
 main
