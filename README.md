@@ -10,3 +10,5 @@
 - 自动配置中文界面
 - 优化系统和客户端设置
 - 配置开机自启动
+
+一键脚本 bash <(wget -qO- https://raw.githubusercontent.com/nimeng1222/qbittorrent-installer/main/install_qbittorrent.sh)
